@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 
 /* ==================================================================================
- * [1] 설정 및 유틸리티
+ * [설정 및 유틸리티] Constants & Utility Functions
  * ================================================================================== */
 
 // 🚨 [필수 수정] n8n에서 복사한 Production URL을 여기에 붙여넣으세요!
@@ -17,7 +17,13 @@ const N8N_GET_URL = "https://n8n.handogu.kr/webhook/get-inspections";
 const N8N_POST_URL = "https://n8n.handogu.kr/webhook/sync-inspections";
 
 // 청별 색상
-const OFFICE_COLORS = { '서울청': 'bg-blue-500', '대전청': 'bg-indigo-500', '원주청': 'bg-violet-500', '제주도': 'bg-fuchsia-500' };
+const OFFICE_COLORS = { 
+  '서울청': 'bg-blue-500', 
+  '대전청': 'bg-indigo-500', 
+  '원주청': 'bg-violet-500', 
+  '제주도': 'bg-fuchsia-500' 
+};
+
 const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
 
 // 날짜 포맷 (YY.MM.DD)
@@ -38,12 +44,17 @@ const getQuarter = (dateStr) => {
   return Math.floor(date.getMonth() / 3) + 1;
 };
 
+// 초기 샘플 데이터 (로딩 전 또는 에러 시 표시)
+const INITIAL_DATA = [
+  { id: 1, date: '2024-02-10', site: '서울 숲 아이파크', office: '서울청', manager: '김철수', status: '완료', result: '양호', details: '초기 토공사 안전 점검 완료.', photos: [] }
+];
+
 /* ==================================================================================
- * [2] 메인 앱 (App)
+ * [메인 앱] App Component
  * ================================================================================== */
 const App = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [inspections, setInspections] = useState([]); // DB 연동을 위해 빈 배열로 시작
+  const [inspections, setInspections] = useState([]); 
   const [selectedInspectionId, setSelectedInspectionId] = useState(null);
   const [notification, setNotification] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -54,28 +65,54 @@ const App = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- [API] 데이터 불러오기 (Read) ---
+  // --- [API] 데이터 불러오기 (Read) - [수정됨: 안전장치 추가] ---
   useEffect(() => {
     const fetchData = async () => {
-      // URL이 설정되지 않았으면(초기 상태) 실행하지 않음
-      if (N8N_GET_URL.includes("여기에")) return;
+      // URL이 설정되지 않았으면 실행하지 않음
+      if (N8N_GET_URL.includes("여기에")) {
+        console.warn("n8n URL 미설정: 샘플 데이터를 사용합니다.");
+        setInspections(INITIAL_DATA);
+        return;
+      }
 
       setIsLoading(true);
       try {
         const response = await fetch(N8N_GET_URL);
-        if (!response.ok) throw new Error('Network response was not ok');
-        const data = await response.json();
         
-        // 데이터 전처리 (콤마로 구분된 사진 문자열 -> 배열로 변환)
-        const formattedData = data.map(item => ({
+        // HTTP 에러 체크
+        if (!response.ok) {
+            throw new Error(`서버 응답 오류: ${response.status}`);
+        }
+
+        const rawData = await response.json();
+        console.log("n8n 응답 데이터:", rawData); // 디버깅용 로그
+
+        // [중요] 데이터가 배열인지 확인하고, 아니면 배열로 변환
+        let dataArray = [];
+        if (Array.isArray(rawData)) {
+            dataArray = rawData;
+        } else if (rawData && typeof rawData === 'object') {
+            // 만약 { data: [...] } 형태로 왔다면
+            if (Array.isArray(rawData.data)) dataArray = rawData.data;
+            // 혹은 단일 객체가 왔다면 배열로 감싸기
+            else dataArray = [rawData];
+        } else {
+            console.error("데이터 형식이 올바르지 않습니다:", rawData);
+            dataArray = [];
+        }
+        
+        // 데이터 전처리 (사진 문자열 -> 배열 변환 등)
+        const formattedData = dataArray.map(item => ({
           ...item,
+          // photos가 없거나 문자열이 아닐 경우 대비
           photos: item.photos ? String(item.photos).split(',').filter(p => p.trim() !== '') : []
         }));
         
         setInspections(formattedData);
       } catch (error) {
         console.error("데이터 로딩 실패:", error);
-        showNotification('데이터를 불러오는데 실패했습니다.', 'error');
+        showNotification(`데이터 로딩 실패: ${error.message}`, 'error');
+        setInspections([]); // 에러 시 빈 배열로 초기화 (화면 깨짐 방지)
       } finally {
         setIsLoading(false);
       }
@@ -94,7 +131,7 @@ const App = () => {
     }
 
     if (N8N_POST_URL.includes("여기에")) {
-       showNotification('저장되었습니다 (로컬 모드 - URL 미설정)', 'success');
+       showNotification('저장되었습니다 (로컬 모드)', 'success');
        return;
     }
 
@@ -102,17 +139,19 @@ const App = () => {
     try {
       showNotification('서버에 저장 중...', 'loading');
       
-      // 사진 배열을 콤마 문자열로 변환하여 전송
       const payload = {
         ...record,
         photos: Array.isArray(record.photos) ? record.photos.join(',') : ''
       };
 
-      await fetch(N8N_POST_URL, {
+      const response = await fetch(N8N_POST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+
+      if (!response.ok) throw new Error('서버 응답 오류');
+
       showNotification('성공적으로 저장되었습니다.', 'success');
     } catch (error) {
       console.error("저장 실패:", error);
@@ -176,7 +215,7 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v5.0 (Live)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v5.2 (SafeMap)</p>
             </div>
           </div>
         </div>
