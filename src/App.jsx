@@ -13,8 +13,8 @@ import {
  * ================================================================================== */
 
 // 🚨 [필수 수정] n8n에서 복사한 Production URL을 여기에 붙여넣으세요!
-const N8N_GET_URL = "https://n8n.handogu.kr/webhook-test/get-inspections"; 
-const N8N_POST_URL = "https://n8n.handogu.kr/webhook-test/sync-inspections";
+const N8N_GET_URL = "https://n8n.handogu.kr/webhook/get-inspections"; 
+const N8N_POST_URL = "https://n8n.handogu.kr/webhook/sync-inspections";
 
 // 청별 고유 색상 (차트 및 배지용)
 const OFFICE_COLORS = { 
