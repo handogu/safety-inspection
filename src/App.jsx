@@ -103,12 +103,12 @@ const App = () => {
             dataArray = [];
         }
         
-        // 데이터 전처리 (사진 문자열 -> 배열 변환 등)
+        // 데이터 전처리 (안전장치 강화)
         const formattedData = dataArray.map(item => ({
           ...item,
           // photos가 없거나 문자열이 아닐 경우 대비
           photos: item.photos ? String(item.photos).split(',').filter(p => p.trim() !== '') : [],
-          // date가 없을 경우 빈 문자열 처리
+          // date가 없을 경우 빈 문자열 처리 (undefined 방지)
           date: item.date || ''
         }));
         
@@ -227,21 +227,16 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v5.4 (Safe Date)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v5.5 (Final Fix)</p>
             </div>
           </div>
         </div>
       </nav>
-      
-      {/* 메인 콘텐츠 영역 */}
       <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50 relative">
         {renderContent()}
-        
-        {/* 알림 토스트 (Toast) */}
         {notification && (
           <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 z-[200] animate-in slide-in-from-bottom-5 fade-in duration-300 ${notification.type === 'success' ? 'bg-green-600 text-white' : notification.type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-900 text-white'}`}>
-            {notification.type === 'loading' ? <Loader size={18} className="animate-spin" /> : 
-             notification.type === 'success' ? <CheckCircle2 size={18} /> : <Info size={18} />}
+            {notification.type === 'loading' ? <Loader size={18} className="animate-spin" /> : notification.type === 'success' ? <Check size={18} /> : <Info size={18} />}
             <span className="font-bold text-xs">{notification.message}</span>
           </div>
         )}
@@ -262,8 +257,11 @@ const Dashboard = ({ inspections }) => {
   const yearGroups = useMemo(() => {
     const groups = {};
     inspections.forEach(item => {
-      // item.date가 없을 경우 'Unknown' 처리
-      const year = (item.date && typeof item.date === 'string') ? item.date.split('-')[0] : 'Unknown';
+      // date 유효성 검사 및 안전한 split
+      const year = (item.date && typeof item.date === 'string' && item.date.includes('-')) 
+        ? item.date.split('-')[0] 
+        : 'Unknown';
+        
       if (!groups[year]) groups[year] = [];
       groups[year].push(item);
     });
@@ -272,215 +270,49 @@ const Dashboard = ({ inspections }) => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 text-left">
-      <div className="px-1 text-left">
-        <h2 className="text-2xl font-black text-slate-900 tracking-tight text-left">연도별 종합 현황</h2>
-        <p className="text-slate-500 text-xs mt-0.5 tracking-tight font-medium text-left">각 연도별, 청별, 분기별 상세 통계 및 그래프입니다.</p>
-      </div>
+      <div className="px-1 text-left"><h2 className="text-2xl font-black text-slate-900 tracking-tight text-left">연도별 종합 현황</h2><p className="text-slate-500 text-xs mt-0.5 tracking-tight font-medium text-left">각 연도별, 청별, 분기별 상세 통계 및 그래프입니다.</p></div>
       {yearGroups.map(([year, data]) => <YearlySection key={year} year={year} data={data} />)}
       {yearGroups.length === 0 && <div className="text-center py-20 text-slate-400 font-bold">데이터가 없습니다.</div>}
     </div>
   );
 };
 
-// 연도별 섹션
 const YearlySection = ({ year, data }) => {
   const stats = useMemo(() => {
     const byOffice = { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 };
     const byQuarter = { 1: 0, 2: 0, 3: 0, 4: 0 };
-    const byQuarterOffice = {
-      1: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 },
-      2: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 },
-      3: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 },
-      4: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 },
-    };
-
+    const byQuarterOffice = { 1: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 }, 2: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 }, 3: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 }, 4: { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 } };
+    
     data.forEach(item => {
-      // Office 정보가 있는 경우만 카운트
-      if (item.office && byOffice.hasOwnProperty(item.office)) {
-        byOffice[item.office]++;
-      }
-      
+      if (item.office && byOffice.hasOwnProperty(item.office)) byOffice[item.office]++;
       const q = getQuarter(item.date);
       if (byQuarter.hasOwnProperty(q)) byQuarter[q]++;
-      
-      if (item.office && byQuarterOffice[q] && byQuarterOffice[q].hasOwnProperty(item.office)) {
-        byQuarterOffice[q][item.office]++;
-      }
+      if (item.office && byQuarterOffice[q] && byQuarterOffice[q].hasOwnProperty(item.office)) { byQuarterOffice[q][item.office]++; }
     });
 
     const maxQuarterCount = Math.max(...Object.values(byQuarter), 0);
     const scaleMax = Math.max(10, maxQuarterCount);
-
     return { total: data.length, byOffice, byQuarter, byQuarterOffice, scaleMax };
   }, [data]);
 
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-6">
-      <div className="flex items-center space-x-3 border-b border-slate-100 pb-4">
-        <div className="bg-slate-900 text-white px-3 py-1 rounded-lg font-black text-sm">{year}년</div>
-        <div className="h-px flex-1 bg-slate-100"></div>
-      </div>
-
+      <div className="flex items-center space-x-3 border-b border-slate-100 pb-4"><div className="bg-slate-900 text-white px-3 py-1 rounded-lg font-black text-sm">{year}년</div><div className="h-px flex-1 bg-slate-100"></div></div>
       <div className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-          <div className="flex items-center space-x-2 mr-4">
-            <BarChart3 size={16} className="text-slate-400" />
-            <span className="text-xs font-black text-slate-700">전체 <span className="text-blue-600 text-sm ml-1">{stats.total}</span>건</span>
-          </div>
-          <div className="w-px h-4 bg-slate-300 mx-2 hidden sm:block"></div>
-          {Object.entries(stats.byOffice).map(([office, count]) => (
-            <div key={office} className="flex items-center space-x-1 min-w-[80px]">
-              <span className="text-xs text-slate-500 font-bold">{office}</span>
-              <span className={`text-xs font-black ${count > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{count}건</span>
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-          <div className="flex items-center space-x-2 mr-4">
-            <Clock size={16} className="text-slate-400" />
-            <span className="text-xs font-black text-slate-700">분기별 현황</span>
-          </div>
-          <div className="w-px h-4 bg-slate-300 mx-2 hidden sm:block"></div>
-          {[1, 2, 3, 4].map(q => (
-            <div key={q} className="flex items-center space-x-1 min-w-[80px]">
-              <span className="text-xs text-slate-500 font-bold">{q}분기</span>
-              <span className={`text-xs font-black ${stats.byQuarter[q] > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{stats.byQuarter[q]}건</span>
-            </div>
-          ))}
-        </div>
+        <div className="flex flex-wrap items-center gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100"><div className="flex items-center space-x-2 mr-4"><BarChart3 size={16} className="text-slate-400" /><span className="text-xs font-black text-slate-700">전체 <span className="text-blue-600 text-sm ml-1">{stats.total}</span>건</span></div><div className="w-px h-4 bg-slate-300 mx-2 hidden sm:block"></div>{Object.entries(stats.byOffice).map(([office, count]) => (<div key={office} className="flex items-center space-x-1 min-w-[80px]"><span className="text-xs text-slate-500 font-bold">{office}</span><span className={`text-xs font-black ${count > 0 ? 'text-slate-800' : 'text-slate-300'}`}>{count}건</span></div>))}</div>
+        <div className="flex flex-wrap items-center gap-2 p-4 bg-slate-50 rounded-2xl border border-slate-100"><div className="flex items-center space-x-2 mr-4"><Clock size={16} className="text-slate-400" /><span className="text-xs font-black text-slate-700">분기별 현황</span></div><div className="w-px h-4 bg-slate-300 mx-2 hidden sm:block"></div>{[1, 2, 3, 4].map(q => (<div key={q} className="flex items-center space-x-1 min-w-[80px]"><span className="text-xs text-slate-500 font-bold">{q}분기</span><span className={`text-xs font-black ${stats.byQuarter[q] > 0 ? 'text-blue-600' : 'text-slate-300'}`}>{stats.byQuarter[q]}건</span></div>))}</div>
       </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-2">
-        {/* 가로 막대 그래프 */}
-        <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center">
-          <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center">
-            <PieChart size={14} className="mr-2" /> 청별 점검 비중
-          </h4>
-          <div className="space-y-6">
-            {Object.entries(stats.byOffice).map(([office, count]) => {
-              const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0;
-              return (
-                <div key={office} className="space-y-2">
-                  <div className="flex justify-between text-[11px] font-bold text-slate-500">
-                    <span>{office}</span>
-                    <span>{count}건 ({percent}%)</span>
-                  </div>
-                  <div className="relative group cursor-pointer hover:z-50">
-                    <div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office]}`} 
-                        style={{ width: `${percent}%` }}
-                      ></div>
-                    </div>
-                    
-                    <div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10">
-                      <div className="text-center font-bold">
-                        {office}: <span className="text-blue-200">{count}건</span> ({percent}%)
-                      </div>
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 세로 막대 그래프 */}
-        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]">
-          <div className="flex justify-between items-center mb-8">
-            <h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center">
-              <TrendingUp size={14} className="mr-2" /> 분기별 추이
-            </h4>
-            <span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max Scale: {stats.scaleMax}건</span>
-          </div>
-          
-          <div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative">
-            <div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0">
-              <div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div>
-              <div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div>
-              <div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div>
-            </div>
-
-            {[1, 2, 3, 4].map(q => {
-              const qTotal = stats.byQuarter[q];
-              const totalHeightPct = (qTotal / stats.scaleMax) * 100;
-              
-              return (
-                <div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50">
-                  <div 
-                    className="w-full max-w-[40px] relative transition-all duration-700 ease-out"
-                    style={{ height: `${totalHeightPct}%` }}
-                  >
-                    {/* 숫자 배지 */}
-                    {qTotal > 0 && (
-                      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">
-                        {qTotal}
-                      </span>
-                    )}
-
-                    {/* [Layer 1] 시각적 막대 (둥근 모서리) */}
-                    <div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">
-                       {Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => {
-                          if (count === 0) return null;
-                          const innerHeightPct = (count / qTotal) * 100;
-                          return (
-                            <div 
-                              key={`bg-${office}`} 
-                              className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} 
-                              style={{ height: `${innerHeightPct}%` }}
-                            ></div>
-                          );
-                       })}
-                    </div>
-
-                    {/* [Layer 2] 인터랙션 막대 (툴팁) */}
-                    <div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">
-                       {Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => {
-                          if (count === 0) return null;
-                          const innerHeightPct = (count / qTotal) * 100;
-                          const percent = Math.round((count / qTotal) * 100);
-                          return (
-                            <div 
-                              key={`hit-${office}`} 
-                              className="w-full relative group/segment hover:z-50" 
-                              style={{ height: `${innerHeightPct}%` }}
-                            >
-                               <div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div>
-                               <div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10">
-                                  <div className="text-left leading-tight">
-                                    <p className="font-bold text-blue-200 mb-0.5">{office}</p>
-                                    <p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p>
-                                  </div>
-                                  <div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div>
-                               </div>
-                            </div>
-                          );
-                       })}
-                    </div>
-                  </div>
-
-                  <span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap justify-center gap-4 mt-6">
-            {Object.entries(OFFICE_COLORS).map(([label, color]) => (
-              <div key={label} className="flex items-center space-x-1.5">
-                <div className={`w-2.5 h-2.5 rounded-full ${color}`}></div>
-                <span className="text-[10px] text-slate-500 font-bold">{label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        {/* 가로 차트 */}
+        <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center"><PieChart size={14} className="mr-2" /> 청별 점검 비중</h4><div className="space-y-6">{Object.entries(stats.byOffice).map(([office, count]) => { const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0; return (<div key={office} className="space-y-2"><div className="flex justify-between text-[11px] font-bold text-slate-500"><span>{office}</span><span>{count}건 ({percent}%)</span></div><div className="relative group cursor-pointer hover:z-50"><div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office]}`} style={{ width: `${percent}%` }}></div></div><div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-center font-bold">{office}: <span className="text-blue-200">{count}건</span> ({percent}%)</div><div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div></div></div></div>); })}</div></div>
+        {/* 세로 차트 */}
+        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max Scale: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
       </div>
     </div>
   );
 };
 
-// ... (기존 컴포넌트 유지: FullCalendar, RegisterForm, PerformInspection, Modals)
-// --- 페이지 컴포넌트 2: 캘린더 ---
+/* ===================== [Components] Calendar ===================== */
 const FullCalendar = ({ inspections, onDateClick }) => {
   const [currentDate] = useState(new Date(2024, 4, 1));
   const year = currentDate.getFullYear();
@@ -599,9 +431,9 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const uniqueYears = useMemo(() => {
-    // date가 유효한지 확인하고 연도 추출
+    // date가 유효한지 확인하고 연도 추출 (Fix Split Error)
     const years = data
-      .filter(item => item.date && !isNaN(new Date(item.date).getTime()))
+      .filter(item => item.date && !isNaN(new Date(item.date).getTime()) && item.date.includes('-'))
       .map(item => item.date.split('-')[0]);
     return [...new Set(years)].sort().reverse();
   }, [data]);
