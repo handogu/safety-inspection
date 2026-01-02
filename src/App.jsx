@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 
 /* ==================================================================================
- * [1] 설정 및 유틸리티
+ * [1] 시스템 설정 및 유틸리티
  * ================================================================================== */
 
 // 🚨 [필수] n8n Webhook URL
@@ -29,10 +29,10 @@ const OFFICE_COLORS = {
 
 const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
 
-// 날짜 포맷 (안전장치: 숫자나 null이 와도 처리)
+// 날짜 포맷
 const formatDateShort = (val) => {
   if (!val) return '-';
-  const dateStr = String(val); // 무조건 문자열로 변환
+  const dateStr = String(val);
   const date = new Date(dateStr);
   if (isNaN(date.getTime())) return dateStr; 
   
@@ -42,7 +42,7 @@ const formatDateShort = (val) => {
   return `${year}.${month}.${day}`;
 };
 
-// 분기 계산 (안전장치)
+// 분기 계산
 const getQuarter = (val) => {
   if (!val) return 1;
   const date = new Date(String(val));
@@ -71,7 +71,7 @@ const App = () => {
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- [API] 데이터 불러오기 ---
+  // --- [Logic 1] 데이터 불러오기 ---
   useEffect(() => {
     const fetchData = async () => {
       setErrorInfo(null);
@@ -90,30 +90,20 @@ const App = () => {
         if (Array.isArray(rawData)) dataArray = rawData;
         else if (rawData && typeof rawData === 'object') {
             dataArray = Array.isArray(rawData.data) ? rawData.data : [rawData];
-        } else {
-            dataArray = [];
         }
 
-        // [중요] 모든 필드를 강제 문자열 변환 (숫자 에러 방지)
         const formattedData = dataArray.map(item => {
           const norm = {};
           Object.keys(item).forEach(key => {
-            // 키는 소문자로, 값은 존재하면 그대로 두되 나중에 변환
             norm[key.toLowerCase()] = item[key];
           });
 
           return {
             ...norm,
             id: norm.id || Date.now() + Math.random(),
-            // 숫자가 들어와도 String()으로 감싸서 에러 방지
+            photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : [],
             date: norm.date ? String(norm.date) : '',
-            site: norm.site ? String(norm.site) : '',
-            office: norm.office ? String(norm.office) : '기타',
-            manager: norm.manager ? String(norm.manager) : '',
-            status: norm.status ? String(norm.status) : '대기',
-            result: norm.result ? String(norm.result) : '-',
-            details: norm.details ? String(norm.details) : '',
-            photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : []
+            status: norm.status || '대기' // 기본 상태 설정
           };
         });
         
@@ -129,8 +119,9 @@ const App = () => {
     fetchData();
   }, []);
 
-  // --- [API] 데이터 저장 ---
+  // --- [Logic 2] 통합 데이터 저장 함수 (DB Sync) ---
   const syncDataToDB = async (record) => {
+    // 로컬 상태 업데이트
     const isNew = !inspections.some(i => i.id === record.id);
     setInspections(prev => isNew ? [record, ...prev] : prev.map(i => i.id === record.id ? record : i));
 
@@ -160,10 +151,49 @@ const App = () => {
     }
   };
 
-  const handleUpdateData = (id, updatedData) => {
+  // --- [Logic 3] 시나리오별 핸들러 ---
+
+  // 1. 일정 등록 (Register) -> '대기' 상태로 저장
+  const handleRegisterSchedule = (newData) => {
+    const record = {
+      ...newData,
+      status: '대기', // [규칙 1] 등록 시 무조건 대기
+      result: '-',
+      details: '',
+      photos: []
+    };
+    syncDataToDB(record);
+    setActiveTab('inspect'); // 등록 후 바로 점검 수행 탭으로 이동 (사용성 개선)
+  };
+
+  // 2. 점검 완료 (Inspect) -> '완료' 상태로 업데이트
+  const handleCompleteInspection = (id, resultData) => {
     const currentItem = inspections.find(i => i.id === id);
-    const fullData = { ...currentItem, ...updatedData };
-    syncDataToDB(fullData);
+    if (!currentItem) return;
+
+    const updatedRecord = {
+      ...currentItem,
+      ...resultData,
+      status: '완료' // [규칙 3] 점검 수행 시 완료 처리
+    };
+    
+    syncDataToDB(updatedRecord);
+    setSelectedInspectionId(null);
+    setActiveTab('history'); // 완료 후 이력 조회로 이동
+  };
+
+  // 3. 이력 수정 (Edit) -> 상태 유지하며 내용만 수정
+  const handleEditHistory = (id, modifiedData) => {
+    const currentItem = inspections.find(i => i.id === id);
+    if (!currentItem) return;
+
+    const updatedRecord = {
+      ...currentItem,
+      ...modifiedData
+      // status는 변경하지 않음 (이미 완료된 건이므로)
+    };
+    
+    syncDataToDB(updatedRecord);
   };
 
   const renderContent = () => {
@@ -182,11 +212,11 @@ const App = () => {
         if (ins.status === '완료') { setActiveTab('history'); } 
         else { setSelectedInspectionId(ins.id); setActiveTab('inspect'); } 
       }} />;
-      case 'register': return <RegisterForm onAdd={(data) => { syncDataToDB(data); setActiveTab('history'); }} />;
+      case 'register': return <RegisterForm onAdd={handleRegisterSchedule} />;
       case 'inspect': return <PerformInspection inspections={inspections} preSelectedId={selectedInspectionId} 
-        onUpdate={(id, data) => { handleUpdateData(id, { ...data, status: '완료' }); setSelectedInspectionId(null); setActiveTab('history'); }} 
+        onUpdate={handleCompleteInspection} 
       />;
-      case 'history': return <HistoryView data={inspections} onEditSave={handleUpdateData} onNotify={showNotification} />;
+      case 'history': return <HistoryView data={inspections} onEditSave={handleEditHistory} onNotify={showNotification} />;
       default: return <Dashboard inspections={inspections} />;
     }
   };
@@ -214,7 +244,7 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v6.4 (NumFix)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v7.0 (Logic Reset)</p>
             </div>
           </div>
         </div>
@@ -252,9 +282,8 @@ const Dashboard = ({ inspections }) => {
     const groups = {};
     inspections.forEach(item => {
       let year = 'Unknown';
-      // 날짜가 문자열이고 길이가 충분할 때만 분리
-      if (item.date && String(item.date).length >= 4) {
-        year = String(item.date).split('-')[0];
+      if (item.date && typeof item.date === 'string' && item.date.length >= 4) {
+        year = item.date.split('-')[0];
       }
       if (!groups[year]) groups[year] = [];
       groups[year].push(item);
@@ -349,18 +378,15 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   const [scheduleData, setScheduleData] = useState({ site: '', date: '', office: '서울청', manager: '' });
   const [resultData, setResultData] = useState({ result: '양호', details: '', photos: [] });
   const fileInputRef = useRef(null);
-  const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
-  const pendingList = useMemo(() => inspections.filter(i => i.status !== '완료'), [inspections]);
+  
+  // [수정: 필터링 로직] '대기' 상태인 항목만 보여줌
+  const pendingList = useMemo(() => inspections.filter(i => i.status === '대기'), [inspections]);
 
-  // [수정: 데이터 불러오기 시점 제어] 
-  // 선택된 ID가 바뀔 때만(최초 1회) 기존 데이터를 상태에 넣음.
-  // 사용자가 수정하는 동안 inspections가 바뀌어도 덮어쓰지 않음.
   useEffect(() => {
     const id = preSelectedId || selectedId;
     if (id) {
       const item = inspections.find(i => i.id === id);
       if (item) { 
-        // 기존 데이터 불러오기
         setScheduleData({ 
             site: String(item.site), 
             date: String(item.date), 
@@ -374,14 +400,14 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
         }); 
       }
     }
-  }, [selectedId, preSelectedId]); // inspections 의존성 제거
+  }, [selectedId, preSelectedId]);
 
   const handlePhotoChange = (e) => { const files = Array.from(e.target.files); const fileNames = files.map(f => f.name); setResultData(prev => ({ ...prev, photos: [...prev.photos, ...fileNames] })); };
   const removePhoto = (index) => { setResultData(prev => ({ ...prev, photos: prev.photos.filter((_, i) => i !== index) })); };
   
-  // 수정된 데이터 포함하여 전송
+  // [수정: 완료 처리] 완료 상태로 변경하여 상위 핸들러 호출
   const handleFinalSubmit = () => { 
-      onUpdate(selectedId, { ...scheduleData, ...resultData }); 
+      onUpdate(selectedId, { ...scheduleData, ...resultData, status: '완료' }); 
   };
 
   return (
@@ -434,7 +460,7 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   );
 };
 
-// ... (HistoryView, Modals 등 기존 컴포넌트 동일 유지)
+/* ===================== [Components] History & Modals ===================== */
 const HistoryView = ({ data, onEditSave, onNotify }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOffice, setFilterOffice] = useState('전체');
@@ -446,10 +472,10 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const uniqueYears = useMemo(() => {
-    // date가 유효한지 확인하고 연도 추출 (Fix Split Error)
+    // date가 유효한지 확인하고 연도 추출
     const years = data
-      .filter(item => item.date && !isNaN(new Date(item.date).getTime()) && String(item.date).includes('-'))
-      .map(item => String(item.date).split('-')[0]);
+      .filter(item => item.date && !isNaN(new Date(item.date).getTime()) && item.date.includes('-'))
+      .map(item => item.date.split('-')[0]);
     return [...new Set(years)].sort().reverse();
   }, [data]);
 
@@ -457,8 +483,9 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
     return data.filter(i => {
       // date 유효성 검사 추가 (filter out invalid dates to prevent crashes)
       const isValidDate = i.date && !isNaN(new Date(i.date).getTime());
-      
-      const matchYear = filterYear === '전체' || (i.date && String(i.date).startsWith(filterYear));
+      if (!isValidDate) return false;
+
+      const matchYear = filterYear === '전체' || i.date.startsWith(filterYear);
       const matchSite = (i.site || "").toLowerCase().includes(searchTerm.toLowerCase());
       const matchOffice = filterOffice === '전체' || i.office === filterOffice;
       const isAfterStart = !startDate || i.date >= startDate;
@@ -524,6 +551,7 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
   );
 };
 
+// ... (ReportModal, EditModal 등 기존 모달 컴포넌트는 유지)
 const ReportModal = ({ item, onClose }) => (
   <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
     <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] text-left">
