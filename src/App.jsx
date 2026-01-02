@@ -9,18 +9,17 @@ import {
   ArrowRight, ChevronLeft, ChevronRight, Calendar as CalendarIcon, Info, 
   Building2, FileText, X, Image as ImageIcon, ExternalLink, ShieldAlert, 
   Edit3, Save, BarChart3, CalendarDays, TrendingUp, PieChart, Download, 
-  Loader, Check
+  Loader, Check, AlertTriangle
 } from 'lucide-react';
 
 /* ==================================================================================
- * [1] 설정 및 유틸리티 (Constants & Utility Functions)
+ * [1] 설정 및 유틸리티
  * ================================================================================== */
 
-// 🚨 [필수] n8n Webhook URL을 여기에 직접 입력하세요 (따옴표 안 유지)
+// 🚨 [필수] n8n Webhook URL
 const N8N_GET_URL = "https://n8n.handogu.kr/webhook/get-inspections"; 
 const N8N_POST_URL = "https://n8n.handogu.kr/webhook/sync-inspections";
 
-// 청별 색상 (차트 및 배지용)
 const OFFICE_COLORS = { 
   '서울청': 'bg-blue-500', 
   '대전청': 'bg-indigo-500', 
@@ -28,24 +27,25 @@ const OFFICE_COLORS = {
   '제주도': 'bg-fuchsia-500' 
 };
 
-// 청 표시 순서
 const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
 
-// 날짜 포맷 단축 함수
-const formatDateShort = (dateStr) => {
-  if (!dateStr) return '-';
+// 날짜 포맷 (안전장치: 숫자나 null이 와도 처리)
+const formatDateShort = (val) => {
+  if (!val) return '-';
+  const dateStr = String(val); // 무조건 문자열로 변환
   const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return dateStr;
+  if (isNaN(date.getTime())) return dateStr; 
+  
   const year = date.getFullYear().toString().slice(2);
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   return `${year}.${month}.${day}`;
 };
 
-// 분기 계산 함수
-const getQuarter = (dateStr) => {
-  if (!dateStr) return 1;
-  const date = new Date(dateStr);
+// 분기 계산 (안전장치)
+const getQuarter = (val) => {
+  if (!val) return 1;
+  const date = new Date(String(val));
   if (isNaN(date.getTime())) return 1;
   return Math.floor(date.getMonth() / 3) + 1;
 };
@@ -64,20 +64,22 @@ const App = () => {
   const [selectedInspectionId, setSelectedInspectionId] = useState(null);
   const [notification, setNotification] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorInfo, setErrorInfo] = useState(null);
 
   const showNotification = (message, type = 'info') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
   };
 
-  // --- 데이터 불러오기 ---
+  // --- [API] 데이터 불러오기 ---
   useEffect(() => {
     const fetchData = async () => {
+      setErrorInfo(null);
       if (!N8N_GET_URL || N8N_GET_URL.includes("여기에")) {
-        console.warn("n8n URL 미설정: 로컬 모드");
         setInspections(INITIAL_DATA);
         return;
       }
+
       setIsLoading(true);
       try {
         const response = await fetch(N8N_GET_URL);
@@ -88,18 +90,37 @@ const App = () => {
         if (Array.isArray(rawData)) dataArray = rawData;
         else if (rawData && typeof rawData === 'object') {
             dataArray = Array.isArray(rawData.data) ? rawData.data : [rawData];
+        } else {
+            dataArray = [];
         }
 
-        const formattedData = dataArray.map(item => ({
-          ...item,
-          photos: item.photos ? String(item.photos).split(',').filter(p => p.trim() !== '') : [],
-          date: item.date || ''
-        }));
+        // [중요] 모든 필드를 강제 문자열 변환 (숫자 에러 방지)
+        const formattedData = dataArray.map(item => {
+          const norm = {};
+          Object.keys(item).forEach(key => {
+            // 키는 소문자로, 값은 존재하면 그대로 두되 나중에 변환
+            norm[key.toLowerCase()] = item[key];
+          });
+
+          return {
+            ...norm,
+            id: norm.id || Date.now() + Math.random(),
+            // 숫자가 들어와도 String()으로 감싸서 에러 방지
+            date: norm.date ? String(norm.date) : '',
+            site: norm.site ? String(norm.site) : '',
+            office: norm.office ? String(norm.office) : '기타',
+            manager: norm.manager ? String(norm.manager) : '',
+            status: norm.status ? String(norm.status) : '대기',
+            result: norm.result ? String(norm.result) : '-',
+            details: norm.details ? String(norm.details) : '',
+            photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : []
+          };
+        });
         
         setInspections(formattedData);
       } catch (error) {
-        console.error("데이터 로딩 실패:", error);
-        showNotification('데이터 로딩 실패', 'error');
+        console.error("로딩 실패:", error);
+        setErrorInfo({ title: "데이터 로딩 실패", desc: error.message });
         setInspections(INITIAL_DATA);
       } finally {
         setIsLoading(false);
@@ -108,7 +129,7 @@ const App = () => {
     fetchData();
   }, []);
 
-  // --- 데이터 저장 ---
+  // --- [API] 데이터 저장 ---
   const syncDataToDB = async (record) => {
     const isNew = !inspections.some(i => i.id === record.id);
     setInspections(prev => isNew ? [record, ...prev] : prev.map(i => i.id === record.id ? record : i));
@@ -120,12 +141,19 @@ const App = () => {
 
     try {
       showNotification('서버에 저장 중...', 'loading');
-      const payload = { ...record, photos: Array.isArray(record.photos) ? record.photos.join(',') : '' };
-      await fetch(N8N_POST_URL, {
+      const payload = { 
+        ...record, 
+        photos: Array.isArray(record.photos) ? record.photos.join(',') : '',
+        date: record.date || new Date().toISOString().split('T')[0]
+      };
+      
+      const response = await fetch(N8N_POST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
+      
+      if (!response.ok) throw new Error(`HTTP Error`);
       showNotification('저장 완료', 'success');
     } catch (error) {
       showNotification('서버 저장 실패', 'error');
@@ -186,12 +214,19 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v6.2 (Safe)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v6.4 (NumFix)</p>
             </div>
           </div>
         </div>
       </nav>
-      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50 relative">
+      <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-slate-50 relative flex flex-col">
+        {errorInfo && (
+          <div className="mb-6 bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start space-x-3 animate-in slide-in-from-top-2">
+            <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20} />
+            <div><h4 className="text-sm font-black text-red-700">{errorInfo.title}</h4><p className="text-xs text-red-600 mt-1 font-medium">{errorInfo.desc}</p></div>
+            <button onClick={() => setErrorInfo(null)} className="ml-auto text-red-400 hover:text-red-600"><X size={18} /></button>
+          </div>
+        )}
         {renderContent()}
         {notification && (
           <div className={`fixed bottom-6 right-6 px-5 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 z-[200] animate-in slide-in-from-bottom-5 fade-in duration-300 ${notification.type === 'success' ? 'bg-green-600 text-white' : notification.type === 'error' ? 'bg-red-500 text-white' : 'bg-slate-900 text-white'}`}>
@@ -211,28 +246,34 @@ const NavItem = ({ active, icon, label, onClick }) => (
   </button>
 );
 
-// --- 탭별 컴포넌트 ---
-
+/* ===================== [Components] Dashboard ===================== */
 const Dashboard = ({ inspections }) => {
   const yearGroups = useMemo(() => {
     const groups = {};
     inspections.forEach(item => {
-      const year = (item.date && typeof item.date === 'string' && item.date.length >= 4) ? item.date.split('-')[0] : 'Unknown';
+      let year = 'Unknown';
+      // 날짜가 문자열이고 길이가 충분할 때만 분리
+      if (item.date && String(item.date).length >= 4) {
+        year = String(item.date).split('-')[0];
+      }
       if (!groups[year]) groups[year] = [];
       groups[year].push(item);
     });
-    return Object.entries(groups).sort((a, b) => b[0] === 'Unknown' ? -1 : b[0] - a[0]);
+    return Object.entries(groups).sort((a, b) => {
+        if (a[0] === 'Unknown') return 1;
+        if (b[0] === 'Unknown') return -1;
+        return b[0] - a[0];
+    });
   }, [inspections]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 text-left">
-      <div className="px-1 text-left"><h2 className="text-2xl font-black text-slate-900 tracking-tight">연도별 종합 현황</h2><p className="text-slate-500 text-xs mt-0.5 tracking-tight font-medium">상세 통계 및 그래프입니다.</p></div>
+      <div className="px-1 text-left"><h2 className="text-2xl font-black text-slate-900 tracking-tight text-left">연도별 종합 현황</h2><p className="text-slate-500 text-xs mt-0.5 tracking-tight font-medium text-left">각 연도별, 청별, 분기별 상세 통계 및 그래프입니다.</p></div>
       {yearGroups.map(([year, data]) => <YearlySection key={year} year={year} data={data} />)}
       {yearGroups.length === 0 && <div className="text-center py-20 text-slate-400 font-bold">데이터가 없습니다.</div>}
     </div>
   );
 };
-
 const YearlySection = ({ year, data }) => {
   const stats = useMemo(() => {
     const byOffice = { '서울청': 0, '대전청': 0, '원주청': 0, '제주도': 0 };
@@ -249,7 +290,6 @@ const YearlySection = ({ year, data }) => {
     const scaleMax = Math.max(10, maxQuarterCount);
     return { total: data.length, byOffice, byQuarter, byQuarterOffice, scaleMax };
   }, [data]);
-
   return (
     <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-6">
       <div className="flex items-center space-x-3 border-b border-slate-100 pb-4"><div className="bg-slate-900 text-white px-3 py-1 rounded-lg font-black text-sm">{year}년</div><div className="h-px flex-1 bg-slate-100"></div></div>
@@ -259,14 +299,15 @@ const YearlySection = ({ year, data }) => {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-2">
         {/* Horizontal Bar Chart */}
-        <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center"><PieChart size={14} className="mr-2" /> 청별 점검 비중</h4><div className="space-y-6">{Object.entries(stats.byOffice).map(([office, count]) => { const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0; return (<div key={office} className="space-y-2"><div className="flex justify-between text-[11px] font-bold text-slate-500"><span>{office}</span><span>{count}건 ({percent}%)</span></div><div className="relative group cursor-pointer hover:z-50"><div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office] || 'bg-slate-300'}`} style={{ width: `${percent}%` }}></div></div><div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-center font-bold">{office}: <span className="text-blue-200">{count}건</span> ({percent}%)</div><div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div></div></div></div>); })}</div></div>
+        <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center"><PieChart size={14} className="mr-2" /> 청별 점검 비중</h4><div className="space-y-6">{Object.entries(stats.byOffice).map(([office, count]) => { const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0; return (<div key={office} className="space-y-2"><div className="flex justify-between text-[11px] font-bold text-slate-500"><span>{office}</span><span>{count}건 ({percent}%)</span></div><div className="relative group cursor-pointer hover:z-50"><div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office]}`} style={{ width: `${percent}%` }}></div></div><div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-center font-bold">{office}: <span className="text-blue-200">{count}건</span> ({percent}%)</div><div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div></div></div></div>); })}</div></div>
         {/* Vertical Stacked Bar Chart */}
-        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office] || 'bg-slate-300'} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
+        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max Scale: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
       </div>
     </div>
   );
 };
 
+/* ===================== [Components] Calendar ===================== */
 const FullCalendar = ({ inspections, onDateClick }) => {
   const [currentDate] = useState(new Date(2024, 4, 1));
   const year = currentDate.getFullYear();
@@ -285,6 +326,7 @@ const FullCalendar = ({ inspections, onDateClick }) => {
   );
 };
 
+/* ===================== [Components] Register & Inspect ===================== */
 const RegisterForm = ({ onAdd }) => {
   const [formData, setFormData] = useState({ date: '', site: '', office: '서울청', manager: '' });
   const handleSubmit = (e) => { e.preventDefault(); onAdd({ ...formData, id: Date.now(), status: '대기', result: '-', details: '', photos: [] }); };
@@ -307,19 +349,40 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   const [scheduleData, setScheduleData] = useState({ site: '', date: '', office: '서울청', manager: '' });
   const [resultData, setResultData] = useState({ result: '양호', details: '', photos: [] });
   const fileInputRef = useRef(null);
+  const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
   const pendingList = useMemo(() => inspections.filter(i => i.status !== '완료'), [inspections]);
 
+  // [수정: 데이터 불러오기 시점 제어] 
+  // 선택된 ID가 바뀔 때만(최초 1회) 기존 데이터를 상태에 넣음.
+  // 사용자가 수정하는 동안 inspections가 바뀌어도 덮어쓰지 않음.
   useEffect(() => {
     const id = preSelectedId || selectedId;
     if (id) {
       const item = inspections.find(i => i.id === id);
-      if (item) { setScheduleData({ site: item.site, date: item.date, office: item.office, manager: item.manager }); setResultData({ result: '양호', details: '', photos: [] }); }
+      if (item) { 
+        // 기존 데이터 불러오기
+        setScheduleData({ 
+            site: String(item.site), 
+            date: String(item.date), 
+            office: String(item.office), 
+            manager: String(item.manager) 
+        }); 
+        setResultData({ 
+            result: item.result || '양호', 
+            details: item.details || '', 
+            photos: item.photos || [] 
+        }); 
+      }
     }
-  }, [selectedId, preSelectedId, inspections]);
+  }, [selectedId, preSelectedId]); // inspections 의존성 제거
 
   const handlePhotoChange = (e) => { const files = Array.from(e.target.files); const fileNames = files.map(f => f.name); setResultData(prev => ({ ...prev, photos: [...prev.photos, ...fileNames] })); };
   const removePhoto = (index) => { setResultData(prev => ({ ...prev, photos: prev.photos.filter((_, i) => i !== index) })); };
-  const handleFinalSubmit = () => { onUpdate(selectedId, { ...scheduleData, ...resultData }); };
+  
+  // 수정된 데이터 포함하여 전송
+  const handleFinalSubmit = () => { 
+      onUpdate(selectedId, { ...scheduleData, ...resultData }); 
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 text-left">
@@ -371,6 +434,7 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   );
 };
 
+// ... (HistoryView, Modals 등 기존 컴포넌트 동일 유지)
 const HistoryView = ({ data, onEditSave, onNotify }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterOffice, setFilterOffice] = useState('전체');
@@ -382,18 +446,19 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
   const [selectedIds, setSelectedIds] = useState(new Set());
 
   const uniqueYears = useMemo(() => {
+    // date가 유효한지 확인하고 연도 추출 (Fix Split Error)
     const years = data
-      .filter(item => item.date && !isNaN(new Date(item.date).getTime()) && item.date.includes('-'))
-      .map(item => item.date.split('-')[0]);
+      .filter(item => item.date && !isNaN(new Date(item.date).getTime()) && String(item.date).includes('-'))
+      .map(item => String(item.date).split('-')[0]);
     return [...new Set(years)].sort().reverse();
   }, [data]);
 
   const filteredData = useMemo(() => {
     return data.filter(i => {
+      // date 유효성 검사 추가 (filter out invalid dates to prevent crashes)
       const isValidDate = i.date && !isNaN(new Date(i.date).getTime());
-      if (!isValidDate) return false;
-
-      const matchYear = filterYear === '전체' || i.date.startsWith(filterYear);
+      
+      const matchYear = filterYear === '전체' || (i.date && String(i.date).startsWith(filterYear));
       const matchSite = (i.site || "").toLowerCase().includes(searchTerm.toLowerCase());
       const matchOffice = filterOffice === '전체' || i.office === filterOffice;
       const isAfterStart = !startDate || i.date >= startDate;
