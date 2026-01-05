@@ -46,8 +46,9 @@ const getQuarter = (val) => {
   return Math.floor(date.getMonth() / 3) + 1;
 };
 
+// 초기 샘플 데이터 (ID 형식을 문자로 변경)
 const INITIAL_DATA = [
-  { id: 'sample-1', date: '2024-02-10', site: '서울 숲 아이파크', office: '서울청', manager: '김철수', status: '완료', result: '양호', details: '안전 점검 완료.', photos: [] }
+  { id: 'INS-SAMPLE', date: '2024-02-10', site: '서울 숲 아이파크', office: '서울청', manager: '김철수', status: '완료', result: '양호', details: '안전 점검 완료.', photos: [] }
 ];
 
 /* ==================================================================================
@@ -85,29 +86,18 @@ const App = () => {
         if (Array.isArray(rawData)) dataArray = rawData;
         else if (rawData && typeof rawData === 'object') {
             dataArray = Array.isArray(rawData.data) ? rawData.data : [rawData];
-        } else {
-            dataArray = [];
         }
 
-        // [ID 중복 방지 로직 적용]
-        const formattedData = dataArray.map((item, index) => {
+        const formattedData = dataArray.map(item => {
           const norm = {};
           Object.keys(item).forEach(key => {
             norm[key.toLowerCase()] = item[key];
           });
 
-          // ID가 없으면 'temp-' + 인덱스 + 랜덤값으로 고유 ID 생성 (중복 방지)
-          // ID가 있으면 반드시 문자열로 변환
-          let safeId;
-          if (norm.id && String(norm.id).trim() !== "") {
-              safeId = String(norm.id).trim();
-          } else {
-              safeId = `temp-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`;
-          }
-
           return {
             ...norm,
-            id: safeId,
+            // [핵심] ID가 없으면 INS- 접두사 붙여 생성
+            id: norm.id ? String(norm.id).trim() : `INS-${Date.now()}`,
             photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : [],
             date: norm.date ? String(norm.date) : ''
           };
@@ -127,10 +117,10 @@ const App = () => {
 
   // --- [API] 데이터 저장 ---
   const syncDataToDB = async (record) => {
-    // 저장 시 ID 공백 제거 및 문자열 확인
     const recordId = String(record.id).trim();
     const safeRecord = { ...record, id: recordId };
 
+    // 로컬 업데이트
     const isNew = !inspections.some(i => String(i.id) === recordId);
     setInspections(prev => isNew ? [safeRecord, ...prev] : prev.map(i => String(i.id) === recordId ? safeRecord : i));
 
@@ -160,20 +150,12 @@ const App = () => {
     }
   };
 
-  const handleUpdateData = (id, updatedData) => {
-    const currentItem = inspections.find(i => String(i.id) === String(id));
-    if (currentItem) {
-      const fullData = { ...currentItem, ...updatedData };
-      syncDataToDB(fullData);
-    }
-  };
-
-  // 등록 핸들러 (고유 ID 생성 보장)
+  // 등록 핸들러 (ID 생성 시 INS- 접두사 추가)
   const handleRegisterSchedule = (newData) => {
     const record = {
       ...newData,
-      // 절대 중복되지 않는 ID 생성 (타임스탬프 + 랜덤)
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
+      // [핵심] 숫자가 아닌 문자열 ID 생성 (구글 시트 오인식 방지)
+      id: `INS-${Date.now()}`, 
       status: '대기',
       result: '-',
       details: '',
@@ -181,6 +163,14 @@ const App = () => {
     };
     syncDataToDB(record);
     setActiveTab('inspect');
+  };
+
+  const handleUpdateData = (id, updatedData) => {
+    const currentItem = inspections.find(i => String(i.id) === String(id));
+    if (currentItem) {
+      const fullData = { ...currentItem, ...updatedData };
+      syncDataToDB(fullData);
+    }
   };
 
   const renderContent = () => {
@@ -235,7 +225,7 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v7.3 (ID Gen Fix)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v7.4 (Prefix ID)</p>
             </div>
           </div>
         </div>
@@ -319,7 +309,7 @@ const YearlySection = ({ year, data }) => {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-2">
         <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center"><PieChart size={14} className="mr-2" /> 청별 점검 비중</h4><div className="space-y-6">{Object.entries(stats.byOffice).map(([office, count]) => { const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0; return (<div key={office} className="space-y-2"><div className="flex justify-between text-[11px] font-bold text-slate-500"><span>{office}</span><span>{count}건 ({percent}%)</span></div><div className="relative group cursor-pointer hover:z-50"><div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office]}`} style={{ width: `${percent}%` }}></div></div><div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-center font-bold">{office}: <span className="text-blue-200">{count}건</span> ({percent}%)</div><div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div></div></div></div>); })}</div></div>
-        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max Scale: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
+        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
       </div>
     </div>
   );
@@ -373,14 +363,26 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   useEffect(() => {
     const id = preSelectedId || selectedId;
     if (id) {
-      const item = inspections.find(i => String(i.id) === String(id));
-      if (item) { setScheduleData({ site: item.site, date: item.date, office: item.office, manager: item.manager }); setResultData({ result: '양호', details: '', photos: [] }); }
+      const item = inspections.find(i => String(i.id) === String(id)); // [중요] ID 매칭 시 String으로 변환
+      if (item) { 
+        setScheduleData({ 
+          site: String(item.site), 
+          date: String(item.date), 
+          office: String(item.office), 
+          manager: String(item.manager) 
+        }); 
+        setResultData({ 
+          result: item.result || '양호', 
+          details: item.details || '', 
+          photos: item.photos || [] 
+        }); 
+      }
     }
-  }, [selectedId, preSelectedId]);
+  }, [selectedId, preSelectedId, inspections]); // inspections 의존성 추가
 
   const handlePhotoChange = (e) => { const files = Array.from(e.target.files); const fileNames = files.map(f => f.name); setResultData(prev => ({ ...prev, photos: [...prev.photos, ...fileNames] })); };
   const removePhoto = (index) => { setResultData(prev => ({ ...prev, photos: prev.photos.filter((_, i) => i !== index) })); };
-  const handleFinalSubmit = () => { onUpdate(selectedId, { ...scheduleData, ...resultData }); };
+  const handleFinalSubmit = () => { onUpdate(selectedId, { ...scheduleData, ...resultData, status: '완료' }); };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 text-left">
