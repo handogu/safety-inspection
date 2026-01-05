@@ -18,7 +18,6 @@ import {
 // 🚨 [필수] n8n Webhook URL 확인
 const N8N_GET_URL = "https://n8n.handogu.kr/webhook/get-inspections"; 
 const N8N_POST_URL = "https://n8n.handogu.kr/webhook/sync-inspections";
-
 const OFFICE_COLORS = { 
   '서울청': 'bg-blue-500', 
   '대전청': 'bg-indigo-500', 
@@ -86,6 +85,8 @@ const App = () => {
         if (Array.isArray(rawData)) dataArray = rawData;
         else if (rawData && typeof rawData === 'object') {
             dataArray = Array.isArray(rawData.data) ? rawData.data : [rawData];
+        } else {
+            dataArray = [];
         }
 
         const formattedData = dataArray.map(item => {
@@ -96,7 +97,6 @@ const App = () => {
 
           return {
             ...norm,
-            // [핵심] ID가 없으면 INS- 접두사 붙여 생성
             id: norm.id ? String(norm.id).trim() : `INS-${Date.now()}`,
             photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : [],
             date: norm.date ? String(norm.date) : ''
@@ -120,7 +120,6 @@ const App = () => {
     const recordId = String(record.id).trim();
     const safeRecord = { ...record, id: recordId };
 
-    // 로컬 업데이트
     const isNew = !inspections.some(i => String(i.id) === recordId);
     setInspections(prev => isNew ? [safeRecord, ...prev] : prev.map(i => String(i.id) === recordId ? safeRecord : i));
 
@@ -150,11 +149,9 @@ const App = () => {
     }
   };
 
-  // 등록 핸들러 (ID 생성 시 INS- 접두사 추가)
   const handleRegisterSchedule = (newData) => {
     const record = {
       ...newData,
-      // [핵심] 숫자가 아닌 문자열 ID 생성 (구글 시트 오인식 방지)
       id: `INS-${Date.now()}`, 
       status: '대기',
       result: '-',
@@ -225,7 +222,7 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v7.4 (Prefix ID)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v7.5 (Cal Fix)</p>
             </div>
           </div>
         </div>
@@ -309,32 +306,89 @@ const YearlySection = ({ year, data }) => {
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 pt-2">
         <div className="border border-slate-100 rounded-2xl p-6 h-full min-h-[340px] flex flex-col justify-center"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest mb-6 flex items-center"><PieChart size={14} className="mr-2" /> 청별 점검 비중</h4><div className="space-y-6">{Object.entries(stats.byOffice).map(([office, count]) => { const percent = stats.total > 0 ? Math.round(count / stats.total * 100) : 0; return (<div key={office} className="space-y-2"><div className="flex justify-between text-[11px] font-bold text-slate-500"><span>{office}</span><span>{count}건 ({percent}%)</span></div><div className="relative group cursor-pointer hover:z-50"><div className="w-full h-5 bg-slate-100 rounded-full overflow-hidden shadow-inner"><div className={`h-full rounded-full transition-all duration-1000 ${OFFICE_COLORS[office]}`} style={{ width: `${percent}%` }}></div></div><div className="absolute bottom-full left-[80%] mb-1 px-3 py-1.5 bg-slate-900/95 backdrop-blur-sm text-white text-xs rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-center font-bold">{office}: <span className="text-blue-200">{count}건</span> ({percent}%)</div><div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900/95"></div></div></div></div>); })}</div></div>
-        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
+        <div className="border border-slate-100 rounded-2xl p-6 flex flex-col h-full min-h-[340px]"><div className="flex justify-between items-center mb-8"><h4 className="text-xs font-black text-slate-500 uppercase tracking-widest flex items-center"><TrendingUp size={14} className="mr-2" /> 분기별 추이</h4><span className="text-[9px] bg-slate-100 text-slate-400 px-2 py-1 rounded font-bold">Max Scale: {stats.scaleMax}건</span></div><div className="flex-1 flex items-end justify-between space-x-6 px-4 pb-0 border-b border-slate-200 relative"><div className="absolute inset-0 pointer-events-none flex flex-col justify-between text-[9px] text-slate-300 font-bold z-0"><div className="border-t border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{stats.scaleMax}</span></div><div className="border-t border-dashed border-slate-100 w-full relative h-0"><span className="absolute -top-2 -left-6">{Math.round(stats.scaleMax / 2)}</span></div><div className="border-t border-slate-200 w-full relative h-0"><span className="absolute -top-2 -left-6">0</span></div></div>{[1, 2, 3, 4].map(q => { const qTotal = stats.byQuarter[q]; const totalHeightPct = (qTotal / stats.scaleMax) * 100; return (<div key={q} className="flex flex-col items-center justify-end w-full h-full group relative z-10 hover:z-50"><div className="w-full max-w-[40px] relative transition-all duration-700 ease-out" style={{ height: `${totalHeightPct}%` }}>{qTotal > 0 && (<span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-[11px] font-black text-slate-900 whitespace-nowrap z-30">{qTotal}</span>)}<div className="absolute inset-0 flex flex-col-reverse rounded-t-xl overflow-hidden bg-slate-50 shadow-sm z-10 pointer-events-none">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; return <div key={`bg-${office}`} className={`w-full ${OFFICE_COLORS[office]} border-b border-white/20 last:border-0`} style={{ height: `${innerHeightPct}%` }}></div>; })}</div><div className="absolute inset-0 flex flex-col-reverse overflow-visible z-20">{Object.entries(stats.byQuarterOffice[q]).map(([office, count]) => { if (count === 0) return null; const innerHeightPct = (count / qTotal) * 100; const percent = Math.round((count / qTotal) * 100); return (<div key={`hit-${office}`} className="w-full relative group/segment hover:z-50" style={{ height: `${innerHeightPct}%` }}><div className="absolute inset-0 hover:bg-white/10 transition-colors cursor-pointer"></div><div className="absolute bottom-[80%] left-[80%] mb-1 ml-1 px-3 py-2 bg-slate-900/95 backdrop-blur-sm text-white text-[11px] rounded-xl opacity-0 group-hover/segment:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-[100] shadow-xl border border-white/10"><div className="text-left leading-tight"><p className="font-bold text-blue-200 mb-0.5">{office}</p><p className="font-medium text-white">{count}건 <span className="text-slate-400 text-[10px]">({percent}%)</span></p></div><div className="absolute top-full left-2 border-4 border-transparent border-t-slate-900/95"></div></div></div>); })}</div></div><span className="text-[10px] font-bold text-slate-400 mt-3">{q}분기</span></div>); })}</div><div className="flex flex-wrap justify-center gap-4 mt-6">{Object.entries(OFFICE_COLORS).map(([label, color]) => (<div key={label} className="flex items-center space-x-1.5"><div className={`w-2.5 h-2.5 rounded-full ${color}`}></div><span className="text-[10px] text-slate-500 font-bold">{label}</span></div>))}</div></div>
       </div>
     </div>
   );
 };
 
-/* ===================== [Components] Calendar ===================== */
+/* ===================== [Components] Calendar (Fix Date & Navigation) ===================== */
 const FullCalendar = ({ inspections, onDateClick }) => {
-  const [currentDate] = useState(new Date(2024, 4, 1));
+  // [수정] 오늘 날짜로 초기화
+  const [currentDate, setCurrentDate] = useState(new Date()); 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
+  
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const firstDay = new Date(year, month, 1).getDay();
+  
   const calendarDays = [];
   for (let i = 0; i < firstDay; i++) calendarDays.push(null);
   for (let i = 1; i <= daysInMonth; i++) calendarDays.push(i);
-  const getDayInspections = (day) => { if (!day) return []; const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; return inspections.filter(ins => ins.date === dateStr); };
+
+  // [수정] 월 이동 함수
+  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+
+  const getDayInspections = (day) => {
+    if (!day) return [];
+    // 문자열 비교 (YYYY-MM-DD 형식)
+    const targetDateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return inspections.filter(ins => {
+        // 날짜 데이터가 문자열이고, 포맷이 맞는지 확인
+        return ins.date && String(ins.date).trim() === targetDateStr;
+    });
+  };
+
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-top-4 duration-500 text-left">
-      <div className="flex justify-between items-center px-1"><div className="text-left"><h2 className="text-2xl font-black text-slate-900 tracking-tight">점검 캘린더</h2><p className="text-slate-500 text-xs mt-0.5">날짜별 사업 점검 일정을 확인하세요.</p></div><div className="flex bg-white rounded-xl shadow-sm border border-slate-200 p-1 space-x-1"><button className="p-1.5 hover:bg-slate-50 rounded text-slate-400"><ChevronLeft size={16} /></button><div className="px-3 py-1.5 font-black text-slate-800 text-xs">{year}년 {month + 1}월</div><button className="p-1.5 hover:bg-slate-50 rounded text-slate-400"><ChevronRight size={16} /></button></div></div>
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"><div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (<div key={d} className={`p-3 text-[10px] font-black uppercase tracking-widest ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-slate-400'}`}>{d}</div>))}</div><div className="grid grid-cols-7">{calendarDays.map((day, idx) => { const dayIns = getDayInspections(day); return (<div key={idx} className={`min-h-[110px] md:min-h-[130px] p-2 border-r border-b border-slate-100 last:border-r-0 relative group ${!day ? 'bg-slate-50/30' : ''}`}>{day && (<><div className="flex justify-between items-start mb-1 px-1"><span className="text-[11px] font-black text-slate-400">{day}</span></div><div className="space-y-1 text-left relative">{dayIns.map(ins => (<div key={ins.id} className="relative group/item"><div onClick={() => onDateClick(ins)} className={`px-1.5 py-1 rounded text-[9px] font-black cursor-pointer transition-all border truncate ${ins.status === '완료' ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100' : 'bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100'}`}>{ins.site}</div><div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white p-3 rounded-xl shadow-2xl opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all z-[60] pointer-events-none border border-slate-700"><div className="space-y-2"><div className="flex items-center space-x-1.5 pb-1.5 border-b border-slate-700"><Building2 size={12} className="text-blue-400" /><span className="text-[10px] font-black text-blue-100">{ins.office}</span></div><div className="space-y-1"><p className="text-[11px] font-bold leading-tight line-clamp-2">{ins.site}</p><div className="flex items-center justify-between text-[9px] text-slate-400 pt-1"><span className="flex items-center"><User size={10} className="mr-1" /> {ins.manager}</span><span className={`font-bold px-1.5 py-0.5 rounded ${ins.status === '완료' ? 'text-green-400 bg-green-400/10' : 'text-amber-400 bg-amber-400/10'}`}>{ins.status === '완료' ? '수행완료' : '수행대기'}</span></div></div></div><div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900"></div></div></div>))}</div></>)}</div>); })}</div></div>
+      <div className="flex justify-between items-center px-1">
+        <div className="text-left"><h2 className="text-2xl font-black text-slate-900 tracking-tight">점검 캘린더</h2><p className="text-slate-500 text-xs mt-0.5">날짜별 사업 점검 일정을 확인하세요.</p></div>
+        {/* [수정] 월 이동 버튼 연결 */}
+        <div className="flex bg-white rounded-xl shadow-sm border border-slate-200 p-1 space-x-1">
+          <button onClick={prevMonth} className="p-1.5 hover:bg-slate-50 rounded text-slate-400"><ChevronLeft size={16} /></button>
+          <div className="px-3 py-1.5 font-black text-slate-800 text-xs w-24 text-center">{year}년 {month + 1}월</div>
+          <button onClick={nextMonth} className="p-1.5 hover:bg-slate-50 rounded text-slate-400"><ChevronRight size={16} /></button>
+        </div>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50/50">{['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (<div key={d} className={`p-3 text-[10px] font-black uppercase tracking-widest ${i === 0 ? 'text-red-400' : i === 6 ? 'text-blue-400' : 'text-slate-400'}`}>{d}</div>))}</div>
+        <div className="grid grid-cols-7">
+          {calendarDays.map((day, idx) => {
+            const dayIns = getDayInspections(day);
+            return (
+              <div key={idx} className={`min-h-[110px] md:min-h-[130px] p-2 border-r border-b border-slate-100 last:border-r-0 relative group ${!day ? 'bg-slate-50/30' : ''}`}>
+                {day && (
+                  <>
+                    <div className="flex justify-between items-start mb-1 px-1"><span className={`text-[11px] font-black ${new Date().toDateString() === new Date(year, month, day).toDateString() ? 'text-blue-600 bg-blue-50 px-1.5 rounded-md' : 'text-slate-400'}`}>{day}</span></div>
+                    <div className="space-y-1 text-left relative">
+                      {dayIns.map(ins => (
+                        <div key={ins.id} className="relative group/item">
+                          <div onClick={() => onDateClick(ins)} className={`px-1.5 py-1 rounded text-[9px] font-black cursor-pointer transition-all border truncate ${ins.status === '완료' ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100' : 'bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100'}`}>{ins.site}</div>
+                          {/* 캘린더 툴팁 (기존 유지) */}
+                          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-slate-900 text-white p-3 rounded-xl shadow-2xl opacity-0 invisible group-hover/item:opacity-100 group-hover/item:visible transition-all z-[60] pointer-events-none border border-slate-700">
+                             <div className="space-y-2">
+                              <div className="flex items-center space-x-1.5 pb-1.5 border-b border-slate-700"><Building2 size={12} className="text-blue-400" /><span className="text-[10px] font-black text-blue-100">{ins.office}</span></div>
+                              <div className="space-y-1"><p className="text-[11px] font-bold leading-tight line-clamp-2">{ins.site}</p><div className="flex items-center justify-between text-[9px] text-slate-400 pt-1"><span className="flex items-center"><User size={10} className="mr-1" /> {ins.manager}</span><span className={`font-bold px-1.5 py-0.5 rounded ${ins.status === '완료' ? 'text-green-400 bg-green-400/10' : 'text-amber-400 bg-amber-400/10'}`}>{ins.status === '완료' ? '수행완료' : '수행대기'}</span></div></div>
+                             </div>
+                             <div className="absolute top-full left-1/2 -translate-x-1/2 border-8 border-transparent border-t-slate-900"></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
 
 /* ===================== [Components] Register & Inspect ===================== */
+// ... (나머지 컴포넌트는 변경 없음)
 const RegisterForm = ({ onAdd }) => {
   const [formData, setFormData] = useState({ date: '', site: '', office: '서울청', manager: '' });
   const handleSubmit = (e) => { e.preventDefault(); onAdd({ ...formData, id: Date.now(), status: '대기', result: '-', details: '', photos: [] }); };
