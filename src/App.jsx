@@ -15,7 +15,7 @@ import {
  * [1] 설정 및 유틸리티
  * ================================================================================== */
 
-// 🚨 [필수] n8n Webhook URL
+// 🚨 [필수] n8n Webhook URL 확인
 const N8N_GET_URL = "https://n8n.handogu.kr/webhook/get-inspections"; 
 const N8N_POST_URL = "https://n8n.handogu.kr/webhook/sync-inspections";
 
@@ -47,7 +47,7 @@ const getQuarter = (val) => {
 };
 
 const INITIAL_DATA = [
-  { id: '1', date: '2024-02-10', site: '서울 숲 아이파크', office: '서울청', manager: '김철수', status: '완료', result: '양호', details: '안전 점검 완료.', photos: [] }
+  { id: 'sample-1', date: '2024-02-10', site: '서울 숲 아이파크', office: '서울청', manager: '김철수', status: '완료', result: '양호', details: '안전 점검 완료.', photos: [] }
 ];
 
 /* ==================================================================================
@@ -85,18 +85,29 @@ const App = () => {
         if (Array.isArray(rawData)) dataArray = rawData;
         else if (rawData && typeof rawData === 'object') {
             dataArray = Array.isArray(rawData.data) ? rawData.data : [rawData];
+        } else {
+            dataArray = [];
         }
 
-        const formattedData = dataArray.map(item => {
+        // [ID 중복 방지 로직 적용]
+        const formattedData = dataArray.map((item, index) => {
           const norm = {};
           Object.keys(item).forEach(key => {
             norm[key.toLowerCase()] = item[key];
           });
 
+          // ID가 없으면 'temp-' + 인덱스 + 랜덤값으로 고유 ID 생성 (중복 방지)
+          // ID가 있으면 반드시 문자열로 변환
+          let safeId;
+          if (norm.id && String(norm.id).trim() !== "") {
+              safeId = String(norm.id).trim();
+          } else {
+              safeId = `temp-${Date.now()}-${index}-${Math.random().toString(36).substr(2, 9)}`;
+          }
+
           return {
             ...norm,
-            // [핵심 수정] ID를 반드시 문자열로 변환하여 비교 오류 방지
-            id: norm.id ? String(norm.id).trim() : String(Date.now()),
+            id: safeId,
             photos: norm.photos ? String(norm.photos).split(',').filter(p => p.trim() !== '') : [],
             date: norm.date ? String(norm.date) : ''
           };
@@ -116,17 +127,12 @@ const App = () => {
 
   // --- [API] 데이터 저장 ---
   const syncDataToDB = async (record) => {
-    // 저장할 때도 ID를 문자열로 확실하게 변환
-    const safeRecord = {
-      ...record,
-      id: String(record.id).trim(), 
-      photos: Array.isArray(record.photos) ? record.photos.join(',') : '',
-      date: record.date || new Date().toISOString().split('T')[0]
-    };
+    // 저장 시 ID 공백 제거 및 문자열 확인
+    const recordId = String(record.id).trim();
+    const safeRecord = { ...record, id: recordId };
 
-    // 로컬 상태 업데이트 (ID 타입 일치 비교)
-    const isNew = !inspections.some(i => String(i.id) === safeRecord.id);
-    setInspections(prev => isNew ? [safeRecord, ...prev] : prev.map(i => String(i.id) === safeRecord.id ? safeRecord : i));
+    const isNew = !inspections.some(i => String(i.id) === recordId);
+    setInspections(prev => isNew ? [safeRecord, ...prev] : prev.map(i => String(i.id) === recordId ? safeRecord : i));
 
     if (!N8N_POST_URL || N8N_POST_URL.includes("여기에")) {
        showNotification('저장되었습니다 (로컬 모드)', 'success');
@@ -135,11 +141,16 @@ const App = () => {
 
     try {
       showNotification('서버에 저장 중...', 'loading');
+      const payload = { 
+        ...safeRecord, 
+        photos: Array.isArray(safeRecord.photos) ? safeRecord.photos.join(',') : '',
+        date: safeRecord.date || new Date().toISOString().split('T')[0]
+      };
       
       const response = await fetch(N8N_POST_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(safeRecord) // 변환된 safeRecord 전송
+        body: JSON.stringify(payload)
       });
       
       if (!response.ok) throw new Error(`HTTP Error`);
@@ -150,7 +161,6 @@ const App = () => {
   };
 
   const handleUpdateData = (id, updatedData) => {
-    // ID 비교 시 둘 다 String으로 변환
     const currentItem = inspections.find(i => String(i.id) === String(id));
     if (currentItem) {
       const fullData = { ...currentItem, ...updatedData };
@@ -158,11 +168,12 @@ const App = () => {
     }
   };
 
-  // 등록 핸들러 (ID 생성 시 문자열로)
+  // 등록 핸들러 (고유 ID 생성 보장)
   const handleRegisterSchedule = (newData) => {
     const record = {
       ...newData,
-      id: String(Date.now()), // 문자열 ID 생성
+      // 절대 중복되지 않는 ID 생성 (타임스탬프 + 랜덤)
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, 
       status: '대기',
       result: '-',
       details: '',
@@ -224,7 +235,7 @@ const App = () => {
             </div>
             <div className="overflow-hidden">
               <p className="text-white text-[11px] font-bold truncate">관리자</p>
-              <p className="text-[9px] text-blue-400 truncate italic">v7.2 (StringID)</p>
+              <p className="text-[9px] text-blue-400 truncate italic">v7.3 (ID Gen Fix)</p>
             </div>
           </div>
         </div>
@@ -359,33 +370,17 @@ const PerformInspection = ({ inspections, onUpdate, preSelectedId, onNotify }) =
   const OFFICE_ORDER = ['서울청', '대전청', '원주청', '제주도'];
   const pendingList = useMemo(() => inspections.filter(i => i.status !== '완료'), [inspections]);
 
-  // [수정] 데이터 불러오기 시점: selectedId 변경 시 1회만 로드 (사용자 편집 보호)
   useEffect(() => {
     const id = preSelectedId || selectedId;
     if (id) {
       const item = inspections.find(i => String(i.id) === String(id));
-      if (item) { 
-        setScheduleData({ 
-            site: String(item.site), 
-            date: String(item.date), 
-            office: String(item.office), 
-            manager: String(item.manager) 
-        }); 
-        setResultData({ 
-            result: item.result || '양호', 
-            details: item.details || '', 
-            photos: item.photos || [] 
-        }); 
-      }
+      if (item) { setScheduleData({ site: item.site, date: item.date, office: item.office, manager: item.manager }); setResultData({ result: '양호', details: '', photos: [] }); }
     }
-  }, [selectedId, preSelectedId]); // inspections 의존성 제거하여 편집 내용 보호
+  }, [selectedId, preSelectedId]);
 
   const handlePhotoChange = (e) => { const files = Array.from(e.target.files); const fileNames = files.map(f => f.name); setResultData(prev => ({ ...prev, photos: [...prev.photos, ...fileNames] })); };
   const removePhoto = (index) => { setResultData(prev => ({ ...prev, photos: prev.photos.filter((_, i) => i !== index) })); };
-  
-  const handleFinalSubmit = () => { 
-      onUpdate(selectedId, { ...scheduleData, ...resultData, status: '완료' }); 
-  };
+  const handleFinalSubmit = () => { onUpdate(selectedId, { ...scheduleData, ...resultData }); };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500 text-left">
@@ -460,7 +455,8 @@ const HistoryView = ({ data, onEditSave, onNotify }) => {
     return data.filter(i => {
       // date 유효성 검사 추가 (filter out invalid dates to prevent crashes)
       const isValidDate = i.date && !isNaN(new Date(i.date).getTime());
-      
+      if (!isValidDate) return false;
+
       const matchYear = filterYear === '전체' || (i.date && String(i.date).startsWith(filterYear));
       const matchSite = (i.site || "").toLowerCase().includes(searchTerm.toLowerCase());
       const matchOffice = filterOffice === '전체' || i.office === filterOffice;
